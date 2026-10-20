@@ -1,0 +1,52 @@
+# Download observed ArtStation images with resumable receipts. 20 October 2026 at 18:40 Paris.
+import concurrent.futures, hashlib, json, os, pathlib, re, time, urllib.parse, urllib.request
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SETTINGS = {'workers': int(os.getenv('ZR_DOWNLOAD_WORKERS', '12')), 'attempts': 4, 'timeout': 60, 'destination': 'pages/References/ArtStation/Projects'}
+projects = json.loads((ROOT / 'ArtstationProjects.json').read_text())
+entries = []
+for project in projects:
+    project_id = project['url'].rsplit('/', 1)[-1]
+    known = {image['url']: image for image in project['images']}
+    urls = list(dict.fromkeys(url.replace('&dl=1', '').replace('?dl=1', '') for url in project['downloadLinks']))
+    # Keep the download version once per asset, even when the display uses another resolution. 20 October 2026.
+    asset_key = lambda url: re.sub(r'/(large|4k|8k|original|medium|small)/', '/SIZE/', url.split('?')[0])
+    asset_keys = {asset_key(url) for url in urls}
+    for image in project['images']:
+        if asset_key(image['url']) not in asset_keys:
+            urls.append(image['url']); asset_keys.add(asset_key(image['url']))
+    project['images'] = [dict(known.get(url, {}), url=url) for url in urls]
+    for index, image in enumerate([{'url': project['cover'], 'role': 'cover'}] + project['images']):
+        url = image['url']
+        extension = pathlib.Path(urllib.parse.urlparse(url).path).suffix.lower()
+        if extension not in ('.jpg', '.jpeg', '.png', '.webp', '.gif'): raise ValueError(url)
+        name = f'{project_id}-cover{extension}' if index == 0 else (f"{project_id}-preview-{image['assetId']}{extension}" if image.get('role') == 'preview' else f'{project_id}-{index:03}{extension}')
+        source = ROOT / 'ArtstationImages' / project_id / name
+        image.update(localPath=str(source), manifest=f"{SETTINGS['destination']}/{project_id}/{name}.img.json")
+        if index == 0: project['coverImage'] = image
+        entries.append({'src': str(source), 'dest': f"{SETTINGS['destination']}/{project_id}", 'name': name, 'url': url, 'by': project['author']})
+(ROOT / 'ArtstationProjects.json').write_text(json.dumps(projects, indent=2))
+(ROOT / 'ArtstationUploadPlan.json').write_text(json.dumps(entries, indent=2))
+def download(entry):
+    target = pathlib.Path(entry['src']); target.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(SETTINGS['attempts']):
+        try:
+            if not target.exists():
+                request = urllib.request.Request(entry['url'], headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.artstation.com/'})
+                with urllib.request.urlopen(request, timeout=SETTINGS['timeout']) as response:
+                    if not response.headers.get('Content-Type', '').startswith('image/'): raise ValueError('Not an image')
+                    data = response.read()
+                if not data: raise ValueError('Empty image')
+                temporary = target.with_suffix(target.suffix + '.part'); temporary.write_bytes(data); temporary.replace(target)
+            data = target.read_bytes()
+            return {**entry, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'ok': True}
+        except Exception as error:
+            if attempt + 1 == SETTINGS['attempts']: return {**entry, 'ok': False, 'error': str(error)}
+            time.sleep(2 ** attempt)
+receipts = []
+with concurrent.futures.ThreadPoolExecutor(max_workers=SETTINGS['workers']) as executor:
+    for receipt in executor.map(download, entries):
+        receipts.append(receipt)
+        if len(receipts) % 100 == 0: print(f'{len(receipts)}/{len(entries)} downloaded', flush=True)
+(ROOT / 'ArtstationDownloadProof.json').write_text(json.dumps(receipts, indent=2))
+print(json.dumps({'files': len(receipts), 'failed': sum(not r['ok'] for r in receipts), 'bytes': sum(r.get('bytes', 0) for r in receipts)}), flush=True)
+raise SystemExit(any(not r['ok'] for r in receipts))

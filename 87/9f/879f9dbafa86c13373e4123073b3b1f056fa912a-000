@@ -1,0 +1,44 @@
+# Read only ArtStation cookies in memory; persist only collection names and source links. 20 October 2026 at 18:50 Paris.
+import json, pathlib, re, sqlite3
+from curl_cffi import requests
+from yt_dlp.cookies import MacChromeCookieDecryptor
+class QuietLogger:
+    def debug(self, *args, **kwargs): pass
+    def info(self, *args, **kwargs): pass
+    def warning(self, *args, **kwargs): pass
+root = pathlib.Path(__file__).resolve().parents[1]
+chrome_root = pathlib.Path.home() / 'Library/Application Support/Google/Chrome'
+rows = []
+version = 0
+for profile in [chrome_root / 'Default', *chrome_root.glob('Profile *')]:
+    for database in [profile / 'Cookies', profile / 'Network/Cookies']:
+        if not database.exists(): continue
+        try:
+            connection = sqlite3.connect(f'file:{database}?mode=ro', uri=True)
+            rows = connection.execute("SELECT name,value,encrypted_value FROM cookies WHERE host_key IN ('.artstation.com','www.artstation.com','artstation.com')").fetchall()
+            if rows:
+                version = int(connection.execute("select value from meta where key='version'").fetchone()[0]); break
+        except sqlite3.Error: pass
+    if rows: break
+if not rows: raise SystemExit('No ArtStation cookies available')
+decryptor = MacChromeCookieDecryptor('Chrome', QuietLogger(), version)
+cookies = {name: value or decryptor.decrypt(encrypted) for name, value, encrypted in rows}
+cookies = {name: value for name, value in cookies.items() if value}
+response = requests.get('https://www.artstation.com/api/v2/user_profiles/collections.json', params={'username': 'zenray', 'page': 1, 'per_page': 100}, cookies=cookies, impersonate='chrome', timeout=30)
+print('Authenticated collections API HTTP', response.status_code, flush=True)
+if response.status_code != 200: raise SystemExit(1)
+data = response.json()
+items = data if isinstance(data, list) else data.get('data', data.get('collections', []))
+collections = [{'id': item.get('id'), 'name': item.get('name'), 'projects': item.get('projects_count'), 'private': item.get('is_private'), 'url': f"https://www.artstation.com/zenray/collections/{item.get('id')}"} for item in items]
+(root / 'ArtstationAuthenticatedCollections.json').write_text(json.dumps(collections, indent=2))
+print(json.dumps({'collections': collections, 'fields': list(items[0]) if items else list(data)}))
+# Follow the collection endpoint observed in ArtStation's own client. 20 October 2026.
+game_design = next(item for item in collections if item['name'] == 'Game Design')
+response = requests.get(f"https://www.artstation.com/api/v2/user_profiles/collections/{game_design['id']}/projects.json", params={'page': 1, 'per_page': 20}, cookies=cookies, impersonate='chrome', timeout=30)
+print('Game Design projects HTTP', response.status_code)
+response.raise_for_status()
+data = response.json()
+items = data if isinstance(data, list) else data.get('data', [])
+projects = [{'url': f"https://www.artstation.com/artwork/{item['hash_id']}", 'title': item.get('title'), 'author': item.get('user', {}).get('full_name'), 'cover': item.get('cover', {}).get('small_image_url'), 'coverFields': item.get('cover', {})} for item in items]
+(root / 'ArtstationGameDesignProjects.json').write_text(json.dumps(projects, indent=2))
+print(json.dumps({'gameDesign': projects}))

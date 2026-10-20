@@ -1,0 +1,65 @@
+// Compare every uploaded image against remote Git objects and decode one image per project. 20 October 2026 at 18:50 Paris.
+import fs from 'node:fs/promises'
+import syncFs from 'node:fs'
+import path from 'node:path'
+import { createHash, createDecipheriv } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { encryptDeterministic, loadMasterKey, splitIntoChunks } from '/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayProgress/scripts/lib/img-pipeline.mjs'
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+const clone = path.join(root, 'ArtstationManifestClone')
+const repo = '/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayProgress'
+const report = JSON.parse(await fs.readFile(path.join(root, 'ArtstationIndexMapping.json'), 'utf8'))
+if (process.argv.includes('--test-reject')) report.images[0] = { ...report.images[0], sha256: '0'.repeat(64) }
+const key = loadMasterKey(repo, syncFs)
+if (!key) throw new Error('Media key unavailable')
+const gitHash = buffer => createHash('sha1').update(`blob ${buffer.length}\0`).update(buffer).digest('hex')
+const sha256 = buffer => createHash('sha256').update(buffer).digest('hex')
+const trees = new Map()
+const records = []
+const manifests = new Map()
+for (const image of report.images) {
+  const manifest = JSON.parse(await fs.readFile(path.join(clone, image.manifest), 'utf8'))
+  manifests.set(image.manifest, manifest)
+  const clear = await fs.readFile(image.localPath)
+  if (sha256(clear) !== image.sha256 || clear.length !== manifest.size) throw new Error(`Source mismatch ${image.manifest}`)
+  const treeId = `${manifest.cdnRepo}@${manifest.cdnCommit}`
+  if (!trees.has(treeId)) {
+    const data = JSON.parse(execFileSync('gh', ['api', `repos/matthieuhuguet/${manifest.cdnRepo}/git/trees/${manifest.cdnCommit}?recursive=1`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
+    if (data.truncated) throw new Error(`Truncated tree ${treeId}`)
+    trees.set(treeId, new Map(data.tree.filter(item => item.type === 'blob').map(item => [item.path, item.sha])))
+  }
+  const encrypted = encryptDeterministic(clear, key, image.sha256)
+  if (encrypted.iv !== manifest.iv) throw new Error(`IV mismatch ${image.manifest}`)
+  const chunks = splitIntoChunks(encrypted.cipher)
+  if (chunks.length !== manifest.cdnChunks.length) throw new Error(`Chunk count mismatch ${image.manifest}`)
+  for (let index = 0; index < chunks.length; index++) {
+    if (gitHash(chunks[index]) !== trees.get(treeId).get(manifest.cdnChunks[index])) throw new Error(`Remote blob mismatch ${image.manifest}`)
+  }
+  if (!manifest.thumb || manifest.w < 1 || manifest.h < 1 || manifest.w > 100000 || manifest.h > 100000) throw new Error(`Invalid thumbnail or dimensions ${image.manifest}`)
+  records.push({ manifest: image.manifest, sha256: image.sha256, remoteIdentity: true })
+}
+const samples = [...new Map(report.images.map(image => [image.projectUrl, image])).values()]
+const decoded = []
+let cursor = 0
+await Promise.all(Array.from({ length: 8 }, async () => {
+  while (cursor < samples.length) {
+    const image = samples[cursor++]
+    const manifest = manifests.get(image.manifest)
+    const parts = []
+    for (const chunk of manifest.cdnChunks) {
+      const url = `https://raw.githubusercontent.com/matthieuhuguet/${manifest.cdnRepo}/${manifest.cdnCommit}/${chunk}`
+      const response = await fetch(url, { signal: AbortSignal.timeout(45000) })
+      if (!response.ok) throw new Error(`Sample HTTP ${response.status}`)
+      parts.push(Buffer.from(await response.arrayBuffer()))
+    }
+    const encrypted = Buffer.concat(parts)
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(manifest.iv, 'base64'))
+    decipher.setAuthTag(encrypted.subarray(-16))
+    const clear = Buffer.concat([decipher.update(encrypted.subarray(0, -16)), decipher.final()])
+    if (sha256(clear) !== image.sha256) throw new Error(`Sample hash mismatch ${image.manifest}`)
+    decoded.push({ projectUrl: image.projectUrl, manifest: image.manifest, bytes: clear.length, sha256: image.sha256, decoded: true })
+  }
+}))
+const proof = { checkedAt: new Date().toISOString(), collections: report.collections, projects: report.projects.length, imageFiles: records.length, allRemoteIdentities: records.every(record => record.remoteIdentity), decodedProjectSamples: decoded.length, missing: report.missing, records, samples: decoded }
+await fs.writeFile(path.join(root, 'ArtstationCloudProof.json'), JSON.stringify(proof, null, 2))
+console.log(JSON.stringify({ projects: proof.projects, images: proof.imageFiles, identities: proof.allRemoteIdentities, decodedSamples: decoded.length, missing: proof.missing }))

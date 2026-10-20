@@ -1,0 +1,27 @@
+# Compare all project images with the asset list used by ArtStation's own client. 20 October 2026 at 18:53 Paris.
+import concurrent.futures, json, pathlib, re, time
+from curl_cffi import requests
+root = pathlib.Path(__file__).resolve().parents[1]
+projects = json.loads((root / 'ArtstationProjects.json').read_text())
+def asset_key(url):
+    match = re.search(r'/p/assets/[^?]+?/(\d+)/(\d+)/(\d+)/', url)
+    return int(''.join(match.groups())) if match else url.split('?')[0]
+def audit(project):
+    project_id = project['url'].rsplit('/', 1)[-1]
+    for attempt in range(4):
+        try:
+            response = requests.get(f'https://www.artstation.com/projects/{project_id}.json', impersonate='chrome', timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            source = [{'id': asset['id'], 'url': asset.get('image_url'), 'type': asset.get('asset_type'), 'w': asset.get('width'), 'h': asset.get('height')} for asset in data['assets'] if asset.get('has_image')]
+            observed = {asset_key(image['url']) for image in project['images']}
+            expected = {asset['id'] for asset in source}
+            return {'projectUrl': project['url'], 'expectedImages': len(source), 'observedImages': len(project['images']), 'missing': sorted(expected - observed), 'extra': sorted(observed - expected, key=str), 'sourceImages': source, 'ok': expected == observed}
+        except Exception as error:
+            if attempt == 3: return {'projectUrl': project['url'], 'ok': False, 'error': str(error)}
+            time.sleep(attempt + 1)
+with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+    results = list(executor.map(audit, projects))
+(root / 'ArtstationSourceAudit.json').write_text(json.dumps(results, indent=2))
+print(json.dumps({'projects': len(results), 'verified': sum(item['ok'] for item in results), 'differences': [dict((k,v) for k,v in item.items() if k!='sourceImages') for item in results if not item['ok']], 'expectedImages': sum(item.get('expectedImages', 0) for item in results)}))
+raise SystemExit(any(not item['ok'] for item in results))

@@ -1,0 +1,90 @@
+// Publish verified ArtStation images into the existing Design gallery. 20 October 2026 at 18:45 Paris.
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { withCloneLock } from '/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayProgress/scripts/lib/clone-lock.mjs'
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+const settings = { clone: path.join(root, 'ArtstationManifestClone'), gallery: 'pages/Design/design.json', folderId: 'artstation-zenray-collections', attempts: 5 }
+const read = async p => JSON.parse(await fs.readFile(p, 'utf8'))
+const collections = await read(path.join(root, 'ArtstationCollections.json'))
+const projects = await read(path.join(root, 'ArtstationProjects.json'))
+const downloads = await read(path.join(root, 'ArtstationDownloadProof.json'))
+const byUrl = new Map(projects.map(p => [p.url, p]))
+const byLocal = new Map(downloads.map(p => [p.src, p]))
+const importedAt = new Date().toISOString()
+const mapping = []
+const originalCount = project => project.images.filter(image => image.role !== 'preview').length
+const previewCount = project => project.images.filter(image => image.role === 'preview').length
+function item(image, project, index) {
+  const receipt = byLocal.get(image.localPath)
+  if (!receipt?.ok) throw new Error(`Missing verified download ${image.localPath}`)
+  const manifest = JSON.parse(execFileSync('git', ['-C', settings.clone, 'show', `HEAD:${image.manifest}`], { encoding: 'utf8' }))
+  if (manifest.size !== receipt.bytes) throw new Error(`Size mismatch ${image.manifest}`)
+  mapping.push({ projectUrl: project.url, title: project.title, author: project.author, imageUrl: image.url, manifest: image.manifest, bytes: receipt.bytes, sha256: receipt.sha256, role: index === 0 ? 'cover' : (image.role || 'image'), localPath: image.localPath })
+  return { id: `as-${project.url.split('/').pop()}-${index}`, kind: 'image', path: image.manifest, name: project.title, title: index === 0 ? project.title : `${project.title} · ${image.role === 'preview' ? 'Aperçu du média' : index}`, url: project.url, note: index === 0 ? project.author : '', w: manifest.w || 16, h: manifest.h || 9, addedAt: importedAt }
+}
+const projectCards = new Map(projects.map(project => {
+  const id = project.url.split('/').pop()
+  const items = [project.coverImage, ...project.images].map((image, index) => item(image, project, index))
+  return [project.url, { id: `as-project-${id}`, kind: 'folder', name: project.title, title: project.title, category: project.author, url: project.url, note: `${project.author} · ${originalCount(project)} images · ${previewCount(project)} aperçus${project.media.length ? ` · ${project.media.length} médias intégrés à la source` : ''}`, items, addedAt: importedAt }]
+}))
+const collectionCards = collections.map(collection => {
+  if (collection.expected !== collection.projects.length) throw new Error(`Incomplete collection ${collection.name}`)
+  const entries = collection.projects.map(p => projectCards.get(p.url))
+  if (entries.some(p => !p)) throw new Error(`Missing project in ${collection.name}`)
+  return { id: `as-collection-${collection.url.split('/').pop()}`, kind: 'folder', name: collection.name, url: collection.url, note: `${entries.length} projets`, items: entries, projects: entries, addedAt: importedAt }
+})
+const artstation = { id: settings.folderId, kind: 'folder', name: 'ArtStation', url: 'https://www.artstation.com/zenray/collections', note: `${collections.length} collections · ${projects.length} projets distincts · ${mapping.filter(m => m.role === 'image').length} images`, items: collectionCards, addedAt: importedAt }
+const git = args => execFileSync('git', ['-C', settings.clone, ...args], { encoding: 'utf8', timeout: 300000 })
+const mapPath = 'pages/References/ArtStation/ArtstationIndexMapping.json'
+const summaryPath = 'pages/References/ArtStation/ArtstationIndex.md'
+const report = { importedAt, collections: collections.map(c => ({ name: c.name, url: c.url, expected: c.expected, found: c.projects.length })), projects: projects.map(p => ({ title: p.title, author: p.author, url: p.url, cover: p.cover, images: originalCount(p), previews: previewCount(p), media: p.media })), images: mapping, missing: [] }
+const markdown = ['# ArtStation collection mapping (20 October 2026)', '', `${collections.length} collections, ${projects.length} distinct projects, ${mapping.length} cloud images including covers.`, '', 'All 22 requested collections are mapped, including Game Design.', '', '[Cloud proof](ArtstationCloudProof.json), [source audit](ArtstationSourceAudit.json), [image upload log](ArtstationUploadContinue.log), [preview upload log](ArtstationUploadPreviews.log).', '', '| Collection | Expected | Present | Source |', '|---|---:|---:|---|', ...collections.map(c => `| ${c.name.replaceAll('|', '/')} | ${c.expected} | ${c.projects.length} | [ArtStation](${c.url}) |`), '', '| Project | Cover | Images | Source |', '|---|---|---:|---|', ...projects.map(p => `| ${p.title.replaceAll('|', '/')} | ![cover](${p.cover}) | ${originalCount(p)} images + ${previewCount(p)} aperçus | [ArtStation](${p.url}) |`), ''].join('\n')
+await fs.writeFile(path.join(root, 'ArtstationIndexMapping.json'), JSON.stringify(report, null, 2))
+await fs.writeFile(path.join(root, 'ArtstationIndex.md'), markdown)
+await fs.writeFile(path.join(root, 'ArtstationGalleryAddition.json'), JSON.stringify(artstation, null, 2))
+// Keep the mapping readable without opening a developer tool. 20 October 2026.
+const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('\"', '&quot;')
+const rows = projects.map(p => `<tr><td><img loading=\"lazy\" src=\"${escape(p.cover)}\" width=\"120\"></td><td><a href=\"${escape(p.url)}\">${escape(p.title)}</a><br>${escape(p.author)}</td><td>${originalCount(p)} images<br>${previewCount(p)} aperçus</td><td>${p.images.length + 1} fichiers dans le drive</td></tr>`).join('')
+const fontRoot = '/Users/zenray/Create/Build/Productions/GithubProductions/ZenRayProgress/public/fonts'
+const sansFont = (await fs.readFile(path.join(fontRoot, 'InterVariable.woff2'))).toString('base64')
+const serifFont = (await fs.readFile(path.join(fontRoot, 'AnthropicSerif-Romans.woff2'))).toString('base64')
+const html = `<!doctype html><meta charset=\"utf-8\"><title>ArtStation index mapping</title><style>@font-face{font-family:InterVariable;src:url(data:font/woff2;base64,${sansFont});font-weight:100 900}@font-face{font-family:AnthropicSerif;src:url(data:font/woff2;base64,${serifFont});font-weight:100 900}:root{--font-sans:InterVariable;--font-serif:AnthropicSerif;--preview-width:120px;--spacing:12px}h1,td:nth-child(n+3){font-family:var(--font-serif);font-weight:500}body{font-family:var(--font-sans);font-weight:500;margin:24px;background:#161616;color:#eee}a{color:#89bbff}table{border-collapse:collapse;width:100%}td,th{padding:var(--spacing);border-bottom:1px solid #444;text-align:left}img{width:var(--preview-width)}input{padding:8px;width:60%;font:inherit}tr[hidden]{display:none}</style><h1>ArtStation index mapping</h1><p>20 October 2026 · ${collections.length} collections · ${projects.length} projets · ${mapping.length} fichiers avec couvertures.</p><p>Les 22 collections demandées sont identifiées.</p><p><a href=\"ArtstationUploadContinue.log\">Log des images</a> · <a href=\"ArtstationUploadPreviews.log\">Log des aperçus</a> · <a href=\"ArtstationCloudProof.json\">Preuves cloud</a> · <a href=\"ArtstationIndexMapping.json\">Mapping complet, une ligne par image</a></p><input id=\"filter\" placeholder=\"Rechercher un projet ou un artiste\"><table><thead><tr><th>Couverture</th><th>Projet et source</th><th>Images</th><th>Mapping</th></tr></thead><tbody>${rows}</tbody></table><script>document.querySelector('#filter').addEventListener('input',e=>document.querySelectorAll('tbody tr').forEach(row=>row.hidden=!row.textContent.toLowerCase().includes(e.target.value.toLowerCase())))</script>`
+await fs.writeFile(path.join(root, 'ArtstationIndex.html'), html)
+if (!process.argv.includes('--publish')) { console.log(JSON.stringify({ prepared: true, collections: collections.length, projects: projects.length, imageFiles: mapping.length })); process.exit(0) }
+await withCloneLock(settings.clone, 'Publish ArtStation Design collections', async () => {
+  if (git(['status', '--porcelain']).trim()) throw new Error('Dirty clone')
+  for (let attempt = 0; attempt < settings.attempts; attempt++) {
+    git(['pull', '--rebase', '-q'])
+    const gallery = await read(path.join(settings.clone, settings.gallery))
+    const before = gallery.items.filter(item => item.id !== settings.folderId)
+    const next = { ...gallery, items: [artstation, ...before] }
+    await fs.writeFile(path.join(settings.clone, settings.gallery), JSON.stringify(next))
+    await fs.writeFile(path.join(settings.clone, mapPath), JSON.stringify(report))
+    await fs.writeFile(path.join(settings.clone, summaryPath), markdown)
+    const receiptFiles = ['ArtstationCloudProof.json', 'ArtstationSourceAudit.json', 'ArtstationUploadContinue.log', 'ArtstationUploadPreviews.log']
+    const receiptPaths = []
+    for (const name of receiptFiles) {
+      const relative = `pages/References/ArtStation/${name}`
+      await fs.copyFile(path.join(root, name), path.join(settings.clone, relative))
+      receiptPaths.push(relative)
+    }
+    git(['add', '--', settings.gallery, mapPath, summaryPath, ...receiptPaths])
+    git(['commit', '-q', '-m', 'Import ArtStation collections and verified image mapping'])
+    try { git(['push', '-q', 'origin', 'HEAD:main']); break }
+    catch (error) {
+      // Rebase unrelated concurrent drive writes without replacing their files. 20 October 2026.
+      let published = false
+      for (let retry = 1; retry < settings.attempts; retry++) {
+        git(['pull', '--rebase', '-q'])
+        try { git(['push', '-q', 'origin', 'HEAD:main']); published = true; break }
+        catch (nextError) { if (retry + 1 === settings.attempts) throw nextError }
+      }
+      if (!published) throw error
+      break
+    }
+  }
+  const saved = await read(path.join(settings.clone, settings.gallery))
+  if (saved.items[0].id !== settings.folderId) throw new Error('Gallery verification failed')
+  console.log(JSON.stringify({ published: true, commit: git(['rev-parse', 'HEAD']).trim(), rootItems: saved.items.length, collections: collections.length, projects: projects.length, imageFiles: mapping.length }))
+})

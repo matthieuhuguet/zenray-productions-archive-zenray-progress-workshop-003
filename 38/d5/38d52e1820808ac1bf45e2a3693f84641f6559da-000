@@ -1,0 +1,5 @@
+{
+  "rejected": true,
+  "exitCode": 1,
+  "reason": "An intentionally incorrect SHA-256 was rejected."
+}

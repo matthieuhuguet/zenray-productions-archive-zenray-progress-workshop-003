@@ -1,0 +1,75 @@
+plan: 1431 entries, to upload 166 (img 166, vid 0), missing sources 0, unknown kinds 0
+  0lGBmK                   img    8  vid    0
+  0lOeDV                   img   11  vid    0
+  1N4xa2                   img    2  vid    0
+  2BEkVK                   img    2  vid    0
+  39agxo                   img    1  vid    0
+  3EKKq2                   img    3  vid    0
+  4NbWZW                   img    6  vid    0
+  4NvEPl                   img    2  vid    0
+  4NyWDY                   img    1  vid    0
+  58Oa2A                   img    2  vid    0
+  5BgZdO                   img   12  vid    0
+  5Bln0W                   img    1  vid    0
+  5WKPwE                   img    3  vid    0
+  5WVB5w                   img    1  vid    0
+  6LQadN                   img    2  vid    0
+  6LgW6W                   img    5  vid    0
+  8B2BxG                   img    6  vid    0
+  98L1Oo                   img    6  vid    0
+  98g0Xo                   img    1  vid    0
+  A9NKLV                   img    1  vid    0
+  BkAYDk                   img    1  vid    0
+  GaRPgB                   img    1  vid    0
+  Gqa3d                    img    1  vid    0
+  GvmBJ1                   img    4  vid    0
+  K3drdx                   img    2  vid    0
+  KOwqm9                   img    2  vid    0
+  L4e6R0                   img    4  vid    0
+  PexdoL                   img    3  vid    0
+  QKGRN4                   img    3  vid    0
+  R3VPKA                   img    1  vid    0
+  V2DnNb                   img    5  vid    0
+  WBdGmv                   img    3  vid    0
+  WXbDbN                   img    4  vid    0
+  XJX0Bw                   img    4  vid    0
+  XJnbnY                   img    5  vid    0
+  YGkkVY                   img    2  vid    0
+  Z5RbYw                   img    3  vid    0
+  a0k1dJ                   img    1  vid    0
+  eRmBYY                   img    1  vid    0
+  g0b39m                   img    1  vid    0
+  gRY5Ke                   img    4  vid    0
+  kQJ0WA                   img    1  vid    0
+  lD2g9G                   img    2  vid    0
+  mAW93E                   img    4  vid    0
+  oJ1m3J                   img    2  vid    0
+  oJdvEz                   img    3  vid    0
+  obw5dB                   img    1  vid    0
+  qJENZR                   img    1  vid    0
+  qJXoQa                   img    2  vid    0
+  qQGK6y                   img    4  vid    0
+  vJx9WY                   img    1  vid    0
+  wJZ4Gg                   img    1  vid    0
+  x3EOEE                   img    1  vid    0
+  x3ZYYW                   img    1  vid    0
+  y41ErR                   img    3  vid    0
+  y4mYEn                   img    6  vid    0
+  y4ydE9                   img    1  vid    0
+  yDOyn5                   img    1  vid    0
+      >>> repo image neuf zenrayshards-img-52947611333b (public) créé — zéro clone, zéro check
+      ✓ zenrayshards-img-52947611333b poussé (commit 5c6c3ec)
+To https://github.com/matthieuhuguet/zenray-data.git
+ ! [rejected]              HEAD -> main (fetch first)
+error: failed to push some refs to 'https://github.com/matthieuhuguet/zenray-data.git'
+hint: Updates were rejected because the remote contains work that you do not
+hint: have locally. This is usually caused by another repository pushing to
+hint: the same ref. If you want to integrate the remote changes, use
+hint: 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+push rejected, pull --rebase and retry 1/5
+  checkpoint: 166 manifests pushed (166 total)
+  images 166/166 online
+  index-add: 166 path(s) deferred to /Users/zenray/.claude/tmp/tmp-zenray-progress/ArtstationIndexSpool.txt
+
+✓✓ MAPPED GIT UPLOAD DONE: 166 manifests online, 0 failure(s).
